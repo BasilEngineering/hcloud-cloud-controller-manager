@@ -50,6 +50,10 @@ func newInstances(client *hcloud.Client, robotClient robot.Client, recorder reco
 	return &instances{client, robotClient, recorder, addressFamily, networkID}
 }
 
+func isEdgeNode(node *corev1.Node) bool {
+	return node.Labels["basil.com.tr/edge"] == "true"
+}
+
 // lookupServer attempts to locate the corresponding [*hcloud.Server] or [*hrobotmodels.Server] for a given [*corev1.Node].
 // It returns an error if the Node has an invalid provider ID or if API requests failed.
 // It can return nil server if neither the ProviderID nor the Name matches an existing server.
@@ -127,7 +131,11 @@ func (i *instances) lookupServer(
 func (i *instances) InstanceExists(ctx context.Context, node *corev1.Node) (bool, error) {
 	const op = "hcloud/instancesv2.InstanceExists"
 	metrics.OperationCalled.WithLabelValues(op).Inc()
-
+	if isEdgeNode(node) {
+		return true, fmt.Errorf(
+			"%s: failed to get instance metadata: no matching server found for node '%s': %w",
+			op, node.Name, errServerNotFound)
+	}
 	server, err := i.lookupServer(ctx, node)
 	if err != nil {
 		return false, fmt.Errorf("%s: %w", op, err)
@@ -139,7 +147,11 @@ func (i *instances) InstanceExists(ctx context.Context, node *corev1.Node) (bool
 func (i *instances) InstanceShutdown(ctx context.Context, node *corev1.Node) (bool, error) {
 	const op = "hcloud/instancesv2.InstanceShutdown"
 	metrics.OperationCalled.WithLabelValues(op).Inc()
-
+	if isEdgeNode(node) {
+		return false, fmt.Errorf(
+			"%s: failed to get instance metadata: no matching server found for node '%s': %w",
+			op, node.Name, errServerNotFound)
+	}
 	server, err := i.lookupServer(ctx, node)
 	if err != nil {
 		return false, fmt.Errorf("%s: %w", op, err)
@@ -162,7 +174,9 @@ func (i *instances) InstanceShutdown(ctx context.Context, node *corev1.Node) (bo
 func (i *instances) InstanceMetadata(ctx context.Context, node *corev1.Node) (*cloudprovider.InstanceMetadata, error) {
 	const op = "hcloud/instancesv2.InstanceMetadata"
 	metrics.OperationCalled.WithLabelValues(op).Inc()
-
+	if isEdgeNode(node) {
+		return nil, fmt.Errorf("%s: edge node", op)
+	}
 	server, err := i.lookupServer(ctx, node)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", op, err)
